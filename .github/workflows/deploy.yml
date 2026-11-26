@@ -1,0 +1,38 @@
+name: deploy
+
+# 推送到 main 或手动触发时，把站点部署到 Cloudflare Pages。
+# 需在仓库 Settings → Secrets 添加 CLOUDFLARE_API_TOKEN 与 CLOUDFLARE_ACCOUNT_ID；
+# 没配令牌时部署步自动跳过（Fork 用户可改用 Pages 连 Git 的方式部署，不受影响）。
+# v1.9.2 起：部署前先跑冒烟测试（tests/smoke.mjs），不过不许部署。
+# 工具版本走锁文件：package.json / package-lock.json 锁定 wrangler 3.x，流水线 npm ci
+# 装本地锁定版，不再每次现拉最新版（半夜工具自升版把部署顶坏的根治法，同 ym-mail 样板）。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: 按锁文件装工具（wrangler 锁定版）
+        run: npm ci --no-audit --no-fund
+      - name: 冒烟测试（不过不许部署）
+        run: node tests/smoke.mjs
+      - name: 安全定向测试（不过不许部署）
+        run: node tests/security-c.mjs
+      - name: 推送部署到 Cloudflare Pages（仅当配了部署令牌）
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
+        run: |
+          mkdir -p dist/functions
+          cp index.html _headers dist/
+          cp -r functions/. dist/functions/
+          npx -y wrangler pages deploy dist --project-name ym-pan-renhanxu --branch main --commit-dirty=true
